@@ -24,6 +24,7 @@ export interface ParsedPost {
     description?: string,
     img?: string,
     category: string[]
+    event?: string
 }
 
 
@@ -97,7 +98,7 @@ export async function get_actutal_rss(): Promise<ParsedPost[] | undefined> {
     const only_new_rss = await select_only_new_posts(ready_rss)
     const new_inserted_posts_with_id = await insert_new_posts(only_new_rss)
 
-    
+
     return new_inserted_posts_with_id;
 }
 

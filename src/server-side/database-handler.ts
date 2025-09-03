@@ -16,7 +16,7 @@ const client = new MongoClient(uri);
 
 export async function select_only_new_posts(posts: ParsedPost[]) {
     client.connect()
-    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+    const expiresAt = new Date(Date.now() + 1 * 24 * 60 * 60 * 1000)
 
     const database = client.db("rss-parser");
     const collection_items = await database.collection("news").find().toArray();
@@ -39,8 +39,9 @@ export async function insert_new_posts(posts: ParsedPost[]) {
 
 
     const avalible_categories = await get_avalible_categories()
+    const avalible_events = await get_avalible_events()
 
-    const posts_with_categories = await get_category_for_posts(posts, avalible_categories)
+    const posts_with_categories = await get_category_for_posts(posts, avalible_categories, avalible_events)
 
     const posts_to_insert = posts_with_categories!.map(post => {
         return {
@@ -62,7 +63,7 @@ export async function insert_new_posts(posts: ParsedPost[]) {
 }
 
 export async function get_all_posts() {
-
+    client.connect()
     const database = client.db("rss-parser");
     const collection = database.collection("news");
 
@@ -76,14 +77,31 @@ export async function get_all_posts() {
 }
 
 export async function get_avalible_categories(): Promise<string[]> {
+    client.connect()
     const database = client.db("rss-parser");
     const collection = database.collection("news");
 
-    const all_categories: string[] = []
+    let all_categories: string[] = []
 
-    const categories = await collection.find().map(c => {
-        all_categories.concat(c.category)
+    const categories = (await collection.find().toArray()).map(c => {
+        console.log(c)
+        all_categories = all_categories.concat(c.category)
     })
 
     return Array.from(new Set(all_categories))
+}
+
+export async function get_avalible_events(): Promise<string[]> {
+    client.connect()
+    const database = client.db("rss-parser");
+    const collection = database.collection("news");
+    const events: string[] = []
+
+    const categories = (await collection.find().toArray()).map(c => {
+        if (c.event) {
+            events.push(c.event)
+        }
+    })
+
+    return Array.from(new Set(events))
 }
