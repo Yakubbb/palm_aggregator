@@ -16,11 +16,13 @@ export async function get_category_for_posts(posts: ParsedPost[], avalible_categ
 
     const posts_slice = posts.slice(0, 100)
 
+    const posts_left_count = posts.length - 100
+
     console.log('новости на обзор', posts_slice)
     console.log('Доступные ивенты', avalible_events)
     console.log('Доступные категории', avalible_categories)
 
-    const postsJsonString = JSON.stringify(posts_slice.map(post => ({ title: post.title })));
+    const postsJsonString = JSON.stringify(posts_slice.map(post => ({ title: post.title, pubdate: post.pubdate })));
 
 
 
@@ -30,7 +32,7 @@ export async function get_category_for_posts(posts: ParsedPost[], avalible_categ
             contents: `Вот твой набор новостей: ${postsJsonString}`,
             config: {
                 systemInstruction: `Ты выступаешь в роли группировщика новостей по категориям и событиям. 
-                Ты получаешь набор новостей в формате {title:заголовок новости}
+                Ты получаешь набор новостей в формате {title:заголовок новости, pubdate: дата публикации (иногда нужно учитывать при определения события)}
                 и ты должен сгруппировать по категориям и привязать их к конкретному событию. Из уже существующих событий есть:
                 ${avalible_categories.map(cat => `${cat}, `)} из уже существующих событий есть: ${avalible_events.map(cat => `${cat}, `)}
                 В случае если новость не подходит под событие или под категорию, ты можешь создать новую. Категорий у новости может быть несколько,
@@ -70,6 +72,7 @@ export async function get_category_for_posts(posts: ParsedPost[], avalible_categ
                 const categories_titles = JSON.parse(geminiOutputText!) as { title: string, category: string[], event: string }[];
                 console.log('категории и названия', categories_titles)
                 console.log('Успешно')
+                console.log('Постов осталось', posts_left_count)
                 return posts_slice.map(post => {
                     const options = categories_titles.find(obj => obj.title === post.title);
                     return {
