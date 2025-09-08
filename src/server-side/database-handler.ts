@@ -4,8 +4,18 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { writeFile, access } from "fs/promises";
 import path from "path";
-import { ParsedPost } from './parser';
-import { get_category_for_posts } from './gemini-handler';
+
+export interface ParsedPost {
+    from: string,
+    title: string,
+    pubdate: string,
+    link_html: string,
+    link_xml: string,
+    description?: string,
+    img?: string,
+    category: string[]
+    event?: string
+}
 
 
 
@@ -26,41 +36,6 @@ export async function select_only_new_posts(posts: ParsedPost[]) {
     return not_existing_posts
 }
 
-export async function insert_new_posts(posts: ParsedPost[]) {
-
-    if (posts.length < 1) {
-        return
-    }
-    client.connect()
-    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
-
-    const database = client.db("rss-parser");
-    const collection = database.collection("news");
-
-
-    const avalible_categories = await get_avalible_categories()
-    const avalible_events = await get_avalible_events()
-
-    const posts_with_categories = await get_category_for_posts(posts, avalible_categories, avalible_events)
-
-    const posts_to_insert = posts_with_categories!.map(post => {
-        return {
-            ...post,
-            expiresAt: expiresAt
-        }
-    })
-
-
-    const data = await collection.insertMany(posts_to_insert)
-
-    return posts_to_insert.map(post => {
-        return {
-            ...post,
-            _id: data.insertedIds[posts_to_insert.indexOf(post)]?.toString()
-        }
-    })
-
-}
 
 export async function get_all_posts() {
     client.connect()

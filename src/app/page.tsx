@@ -1,6 +1,5 @@
 'use client'
-import { get_all_posts, get_avalible_categories, get_avalible_events } from "@/server-side/database-handler";
-import { get_actutal_rss, ParsedPost } from "@/server-side/parser";
+import { get_all_posts, get_avalible_categories, get_avalible_events, ParsedPost } from "@/server-side/database-handler";
 import { useEffect, useState, useMemo, useCallback } from "react";
 import { FaSyncAlt, FaSearch, FaFilter, FaTimes, FaSortAmountDown, FaSortNumericDownAlt, FaCalendarAlt, FaChevronDown, FaChevronUp } from 'react-icons/fa';
 import { MdClear } from 'react-icons/md';
@@ -100,7 +99,8 @@ function EventGroupComponent({ event, posts, formatPublicationDate }: { event: s
 
 export default function Home() {
   const [posts, setPosts] = useState<ParsedPost[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [selectedEvent, setSelectedEvent] = useState<string | null>(null);
@@ -108,31 +108,57 @@ export default function Home() {
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [categorySearchTerm, setCategorySearchTerm] = useState<string>('');
   const [sortBy, setSortBy] = useState<'date' | 'eventCount'>('date');
+  const [lastRefreshTime, setLastRefreshTime] = useState<Date | null>(null);
 
-  useEffect(() => {
-    const fetch_async = async () => {
-      try {
-        const fetched_data = await get_all_posts();
-        setPosts(fetched_data as ParsedPost[]);
-      } catch (e) {
-        console.error("Failed to fetch RSS feeds:", e);
-        setError("ERROR: Failed to load feeds. Check server logs.");
-      } finally {
-        setLoading(false);
+  const fetchPosts = useCallback(async (isInitialLoad: boolean = false) => {
+    if (isInitialLoad) {
+      setInitialLoading(true);
+    } else {
+      setRefreshing(true);
+    }
+    setError(null);
+    try {
+      const new_posts_fetched = await get_all_posts();
+      setPosts(prevPosts => {
+        const existingLinks = new Set(prevPosts.map(p => p.link_html));
+        const newUniquePosts = new_posts_fetched.filter(newPost => !existingLinks.has(newPost.link_html));
+        if (newUniquePosts.length > 0) {
+          const combinedPosts = [...prevPosts, ...newUniquePosts];
+          return combinedPosts.sort((a, b) => new Date(b.pubdate).getTime() - new Date(a.pubdate).getTime());
+        }
+        return prevPosts;
+      });
+      setLastRefreshTime(new Date());
+    } catch (e) {
+      console.error("Failed to fetch RSS feeds:", e);
+      setError("ERROR: Failed to load feeds. Check server logs.");
+    } finally {
+      if (isInitialLoad) {
+        setInitialLoading(false);
+      } else {
+        setRefreshing(false);
       }
-    };
-    fetch_async();
+    }
   }, []);
 
   useEffect(() => {
-    const fetchdata = async () => {
+    fetchPosts(true);
+    const fetchDropdownData = async () => {
       await get_avalible_categories();
       await get_avalible_events();
     };
-    fetchdata();
-  }, []);
+    fetchDropdownData();
+  }, [fetchPosts]);
 
-  const formatPublicationDate = (dateString: string) => {
+  useEffect(() => {
+    const refreshInterval = setInterval(() => {
+      fetchPosts(false);
+    }, 120000);
+
+    return () => clearInterval(refreshInterval);
+  }, [fetchPosts]);
+
+  const formatPublicationDate = useCallback((dateString: string) => {
     try {
       const date = new Date(dateString);
       return date.toLocaleString('ru-RU', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
@@ -140,7 +166,12 @@ export default function Home() {
       console.error("Failed to format date:", dateString, e);
       return dateString;
     }
-  };
+  }, []);
+
+  const formatLastRefreshTime = useCallback((date: Date | null) => {
+    if (!date) return '';
+    return date.toLocaleString('ru-RU', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  }, []);
 
   const allCategories = useMemo(() => {
     const uniqueCategories = new Set<string>();
@@ -288,25 +319,6 @@ export default function Home() {
     setVisiblePostsCount(POSTS_PER_PAGE);
   }, []);
 
-  const handleRefresh = useCallback(() => {
-    const fetch_data = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const new_posts_fetched = await get_actutal_rss();
-        if (new_posts_fetched) {
-          setPosts(prevPosts => [...new_posts_fetched, ...prevPosts] as ParsedPost[]);
-        }
-      } catch (e) {
-        console.error("Failed to fetch new RSS feeds on refresh:", e);
-        setError("ERROR: Failed to refresh feeds. Check server logs.");
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetch_data();
-  }, []);
-
   const isFilterActive = selectedCategory !== null || selectedEvent !== null || searchTerm !== '' || categorySearchTerm !== '';
 
   return (
@@ -320,21 +332,28 @@ export default function Home() {
               <h3 className="text-xl font-bold text-slate-800 mb-4 flex items-center gap-2">
                 <FaFilter className="text-indigo-600" /> Меню фильтров
               </h3>
-              <button
-                className="w-full text-center p-3 rounded-lg transition-all duration-200 bg-indigo-600 text-white font-semibold hover:bg-indigo-700 disabled:bg-indigo-300 flex items-center justify-center gap-2"
-                onClick={handleRefresh}
-                disabled={loading}
-              >
-                {loading ? (
-                  <>
-                    <FaSyncAlt className="animate-spin" /> Обновление...
-                  </>
-                ) : (
-                  <>
-                    <FaSyncAlt /> Обновить ленту
-                  </>
+              <div className="flex flex-col gap-2">
+                <button
+                  className="w-full text-center p-3 rounded-lg transition-all duration-200 bg-indigo-600 text-white font-semibold hover:bg-indigo-700 disabled:bg-indigo-300 flex items-center justify-center gap-2"
+                  onClick={() => fetchPosts(false)}
+                  disabled={refreshing}
+                >
+                  {refreshing ? (
+                    <>
+                      <FaSyncAlt className="animate-spin" /> Обновление...
+                    </>
+                  ) : (
+                    <>
+                      <FaSyncAlt /> Обновить ленту
+                    </>
+                  )}
+                </button>
+                {lastRefreshTime && (
+                  <p className="text-sm text-slate-500 text-center">
+                    Последнее обновление: {formatLastRefreshTime(lastRefreshTime)}
+                  </p>
                 )}
-              </button>
+              </div>
             </div>
 
             <div>
@@ -455,10 +474,10 @@ export default function Home() {
         </aside>
 
         <main className="col-span-12 lg:col-span-8 flex flex-col">
-          {loading && <div className="text-center text-lg text-indigo-600 mt-10">Загрузка новостей...</div>}
-          {error && <div className="text-center text-lg text-red-600 p-4 bg-red-100 rounded-lg w-full">{error}</div>}
+          {initialLoading && <div className="text-center text-lg text-indigo-600 mt-10">Загрузка новостей...</div>}
+          {!initialLoading && error && <div className="text-center text-lg text-red-600 p-4 bg-red-100 rounded-lg w-full">{error}</div>}
 
-          {!loading && !error && displayedItems.length > 0 && displayedItems.map((item, index) =>
+          {!initialLoading && !error && displayedItems.length > 0 && displayedItems.map((item, index) =>
             'type' in item && item.type === 'group' ? (
               <EventGroupComponent
                 key={index}
@@ -480,7 +499,7 @@ export default function Home() {
             )
           )}
 
-          {!loading && !error && displayedItems.length === 0 && (
+          {!initialLoading && !error && displayedItems.length === 0 && (
             <div className="text-center text-lg text-slate-500 mt-10 p-5 bg-white rounded-lg shadow-sm">
               Нет доступных постов по вашему запросу. Попробуйте изменить фильтры или обновить ленту.
             </div>
