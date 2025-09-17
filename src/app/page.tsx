@@ -1,100 +1,54 @@
 'use client'
-import { get_all_posts, get_avalible_categories, get_avalible_events, ParsedPost } from "@/server-side/database-handler";
-import { useEffect, useState, useMemo, useCallback } from "react";
-import { FaSyncAlt, FaSearch, FaFilter, FaTimes, FaSortAmountDown, FaSortNumericDownAlt, FaCalendarAlt, FaChevronDown, FaChevronUp } from 'react-icons/fa';
+import { PostComponent, EventGroupComponent } from "@/components/posts_elements";
+import { get_all_posts, ParsedPost } from "@/server-side/database-handler";
+import { useEffect, useState, useMemo, useCallback, useReducer } from "react";
+import { FaSyncAlt, FaSearch, FaFilter, FaTimes, FaSortAmountDown, FaSortNumericDownAlt, FaCalendarAlt } from 'react-icons/fa';
 import { MdClear } from 'react-icons/md';
 
 const POSTS_PER_PAGE = 50;
+const READ_POSTS_STORAGE_KEY = 'readPosts';
 
-function PostComponent({ title, link, from, category, publication_date, rss_link, isGrouped = false }: {
-  title: string,
-  link: string,
-  from: string,
-  category: string[],
-  publication_date: string,
-  rss_link: string,
-  event?: string,
-  isGrouped?: boolean
-}) {
-  const cardClasses = `
-    block w-full p-5 bg-white border border-slate-200 shadow-sm
-    hover:shadow-lg hover:border-indigo-400 transition-all duration-300
-    flex flex-col justify-between text-slate-800
-    ${isGrouped ? 'mb-0 border-t-0 first:border-t rounded-t-none' : 'mb-4 rounded-lg'}
-  `;
+type FilterState = {
+  selectedCategory: string | null;
+  selectedEvent: string | null;
+  searchTerm: string;
+  categorySearchTerm: string;
+  sortBy: 'date' | 'eventCount';
+};
 
-  return (
-    <div className={cardClasses}>
-      <div>
-        <h2 className="text-lg font-semibold text-slate-900 mb-2 break-words">{title}</h2>
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-slate-500 mb-3">
-          <span>Источник: <span className="font-medium text-slate-600">{from}</span></span>
-          <span>Дата: <span className="font-medium text-slate-600">{publication_date}</span></span>
-        </div>
-      </div>
-      <div className="flex flex-col items-start gap-1 mt-3 text-xs">
-        <a href={link} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:text-indigo-800 hover:underline truncate max-w-full">
-          <span className="text-slate-500">URL:</span> {link}
-        </a>
-        <a href={rss_link} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:text-indigo-800 hover:underline truncate max-w-full">
-          <span className="text-slate-500">RSS:</span> {rss_link}
-        </a>
-      </div>
-      {category && category.length > 0 && (
-        <div className="text-xs text-slate-500 mt-3 flex flex-wrap gap-2">
-          {category.map(cat => (
-            <span key={cat} className="bg-slate-100 text-slate-700 px-2 py-1 rounded-full">{cat}</span>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
+type FilterAction =
+  | { type: 'SET_CATEGORY'; payload: string | null }
+  | { type: 'SET_EVENT'; payload: string | null }
+  | { type: 'SET_SEARCH_TERM'; payload: string }
+  | { type: 'SET_CATEGORY_SEARCH_TERM'; payload: string }
+  | { type: 'SET_SORT_BY'; payload: 'date' | 'eventCount' }
+  | { type: 'RESET_FILTERS' };
 
-function EventGroupComponent({ event, posts, formatPublicationDate }: { event: string, posts: ParsedPost[], formatPublicationDate: (date: string) => string }) {
-  const [isOpen, setIsOpen] = useState(false);
-  const toggleOpen = () => setIsOpen(!isOpen);
-  const latestDate = posts.length > 0 ? formatPublicationDate(posts[0].pubdate) : '';
+const initialFilterState: FilterState = {
+  selectedCategory: null,
+  selectedEvent: null,
+  searchTerm: '',
+  categorySearchTerm: '',
+  sortBy: 'date',
+};
 
-  return (
-    <div className="block w-full mb-4 border border-slate-200 rounded-lg shadow-sm bg-white hover:shadow-lg transition-shadow duration-300">
-      <button
-        onClick={toggleOpen}
-        className="w-full p-5 text-left flex justify-between items-center hover:bg-slate-50 rounded-lg transition-colors"
-        aria-expanded={isOpen}
-      >
-        <div className="flex-1 min-w-0 pr-4">
-          <div className="flex flex-col">
-            <h3 className="text-lg font-bold text-indigo-700 break-words">{posts[0].title}</h3>
-            <span className="text-sm text-slate-500 mt-1">Последнее обновление: {latestDate}</span>
-            <span className="text-sm text-slate-500 mt-1">Событие: {event}</span>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-x-4 flex-shrink-0">
-          <span className="bg-indigo-100 text-indigo-700 text-sm font-semibold px-3 py-1 rounded-full hidden sm:block">{posts.length}</span>
-          {isOpen ? <FaChevronUp className="h-5 w-5 text-slate-500" /> : <FaChevronDown className="h-5 w-5 text-slate-500" />}
-        </div>
-      </button>
-
-      {isOpen && (
-        <div className="bg-slate-50/50 rounded-b-lg pt-1">
-          {posts.map((post, index) => (
-            <PostComponent
-              key={index}
-              title={post.title}
-              link={post.link_html}
-              from={post.from}
-              category={post.category}
-              publication_date={formatPublicationDate(post.pubdate)}
-              rss_link={post.link_xml}
-              isGrouped={true}
-            />
-          ))}
-        </div>
-      )}
-    </div>
-  );
+function filterReducer(state: FilterState, action: FilterAction): FilterState {
+  switch (action.type) {
+    case 'SET_CATEGORY':
+      return { ...state, selectedCategory: action.payload, selectedEvent: null };
+    case 'SET_EVENT':
+      return { ...state, selectedEvent: action.payload, selectedCategory: null };
+    case 'SET_SEARCH_TERM':
+      return { ...state, searchTerm: action.payload };
+    case 'SET_CATEGORY_SEARCH_TERM':
+      return { ...state, categorySearchTerm: action.payload };
+    case 'SET_SORT_BY':
+      return { ...state, sortBy: action.payload };
+    case 'RESET_FILTERS':
+      return initialFilterState;
+    default:
+      return state;
+  }
 }
 
 export default function Home() {
@@ -102,126 +56,105 @@ export default function Home() {
   const [initialLoading, setInitialLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
-  const [selectedEvent, setSelectedEvent] = useState<string | null>(null);
   const [visiblePostsCount, setVisiblePostsCount] = useState(POSTS_PER_PAGE);
-  const [searchTerm, setSearchTerm] = useState<string>('');
-  const [categorySearchTerm, setCategorySearchTerm] = useState<string>('');
-  const [sortBy, setSortBy] = useState<'date' | 'eventCount'>('date');
   const [lastRefreshTime, setLastRefreshTime] = useState<Date | null>(null);
+  const [readPosts, setReadPosts] = useState<Set<string>>(new Set());
+  const [filters, dispatch] = useReducer(filterReducer, initialFilterState);
+
+  useEffect(() => {
+    const storedReadPosts = localStorage.getItem(READ_POSTS_STORAGE_KEY);
+    if (storedReadPosts) {
+      setReadPosts(new Set(JSON.parse(storedReadPosts)));
+    }
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem(READ_POSTS_STORAGE_KEY, JSON.stringify(Array.from(readPosts)));
+  }, [readPosts]);
+
+  const markPostAsRead = useCallback((link: string) => {
+    setReadPosts(prev => {
+      if (prev.has(link)) return prev;
+      const newReadPosts = new Set(prev);
+      newReadPosts.add(link);
+      return newReadPosts;
+    });
+  }, []);
 
   const fetchPosts = useCallback(async (isInitialLoad: boolean = false) => {
-    if (isInitialLoad) {
-      setInitialLoading(true);
-    } else {
-      setRefreshing(true);
-    }
+    isInitialLoad ? setInitialLoading(true) : setRefreshing(true);
     setError(null);
     try {
       const new_posts_fetched = await get_all_posts();
       setPosts(prevPosts => {
         const existingLinks = new Set(prevPosts.map(p => p.link_html));
         const newUniquePosts = new_posts_fetched.filter(newPost => !existingLinks.has(newPost.link_html));
-        if (newUniquePosts.length > 0) {
-          const combinedPosts = [...prevPosts, ...newUniquePosts];
-          return combinedPosts.sort((a, b) => new Date(b.pubdate).getTime() - new Date(a.pubdate).getTime());
-        }
-        return prevPosts;
+        return [...newUniquePosts, ...prevPosts];
       });
       setLastRefreshTime(new Date());
     } catch (e) {
-      console.error("Failed to fetch RSS feeds:", e);
-      setError("ERROR: Failed to load feeds. Check server logs.");
+      console.error("Не удалось загрузить RSS-ленты:", e);
+      setError("ОШИБКА: Не удалось загрузить ленты. Проверьте логи сервера.");
     } finally {
-      if (isInitialLoad) {
-        setInitialLoading(false);
-      } else {
-        setRefreshing(false);
-      }
+      isInitialLoad ? setInitialLoading(false) : setRefreshing(false);
     }
   }, []);
 
   useEffect(() => {
     fetchPosts(true);
-    const fetchDropdownData = async () => {
-      await get_avalible_categories();
-      await get_avalible_events();
-    };
-    fetchDropdownData();
-  }, [fetchPosts]);
-
-  useEffect(() => {
-    const refreshInterval = setInterval(() => {
-      fetchPosts(false);
-    }, 120000);
-
+    const refreshInterval = setInterval(() => fetchPosts(false), 120000);
     return () => clearInterval(refreshInterval);
   }, [fetchPosts]);
 
-  const formatPublicationDate = useCallback((dateString: string) => {
+  const formatPublicationDate = (dateString: string) => {
     try {
-      const date = new Date(dateString);
-      return date.toLocaleString('ru-RU', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+      return new Date(dateString).toLocaleString('ru-RU', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
     } catch (e) {
-      console.error("Failed to format date:", dateString, e);
+      console.error("Не удалось отформатировать дату:", dateString, e);
       return dateString;
     }
-  }, []);
+  };
 
-  const formatLastRefreshTime = useCallback((date: Date | null) => {
+  const formatLastRefreshTime = (date: Date | null) => {
     if (!date) return '';
-    return date.toLocaleString('ru-RU', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
-  }, []);
+    return date.toLocaleString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  };
 
-  const allCategories = useMemo(() => {
-    const uniqueCategories = new Set<string>();
-    posts.forEach(post => {
-      const categories = Array.isArray(post.category) ? post.category : [post.category];
-      categories.forEach(cat => cat && uniqueCategories.add(cat));
-    });
-    return Array.from(uniqueCategories).sort();
-  }, [posts]);
+  const allCategories = useMemo(() => Array.from(new Set(posts.flatMap(p => p.category || []))).sort(), [posts]);
+  const allEvents = useMemo(() => Array.from(new Set(posts.map(p => p.event).filter(Boolean as any))).sort(), [posts]);
 
-  const allEvents = useMemo(() => {
-    const uniqueEvents = new Set<string>();
-    posts.forEach(post => {
-      if (post.event) uniqueEvents.add(post.event);
-    });
-    return Array.from(uniqueEvents).sort();
+  const postCountsByCategory = useMemo(() => {
+    return posts.reduce((counts, post) => {
+      (Array.isArray(post.category) ? post.category : [post.category]).forEach(cat => {
+        if (cat) counts[cat] = (counts[cat] || 0) + 1;
+      });
+      return counts;
+    }, {} as { [key: string]: number });
   }, [posts]);
 
   const filteredCategories = useMemo(() => {
-    if (!categorySearchTerm) return allCategories;
-    return allCategories.filter(category => category.toLowerCase().includes(categorySearchTerm.toLowerCase()));
-  }, [allCategories, categorySearchTerm]);
+    if (!filters.categorySearchTerm) return allCategories;
+    return allCategories.filter(category => category.toLowerCase().includes(filters.categorySearchTerm.toLowerCase()));
+  }, [allCategories, filters.categorySearchTerm]);
 
   const sortedAndFilteredPosts = useMemo(() => {
-    let currentPosts = [...posts];
-
-    if (selectedCategory !== null) {
-      currentPosts = currentPosts.filter(post => Array.isArray(post.category) ? post.category.includes(selectedCategory) : post.category === selectedCategory);
-    } else if (selectedEvent !== null) {
-      currentPosts = currentPosts.filter(post => post.event === selectedEvent);
-    }
-
-    if (searchTerm) {
-      currentPosts = currentPosts.filter(post =>
-        post.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        post.from.toLowerCase().includes(searchTerm.toLowerCase())
-      );
-    }
+    let currentPosts = posts.filter(post => {
+      if (filters.selectedCategory && !(Array.isArray(post.category) ? post.category.includes(filters.selectedCategory) : post.category === filters.selectedCategory)) return false;
+      if (filters.selectedEvent && post.event !== filters.selectedEvent) return false;
+      if (filters.searchTerm && !(post.title.toLowerCase().includes(filters.searchTerm.toLowerCase()) || post.from.toLowerCase().includes(filters.searchTerm.toLowerCase()))) return false;
+      return true;
+    });
 
     currentPosts.sort((a, b) => new Date(b.pubdate).getTime() - new Date(a.pubdate).getTime());
-
     return currentPosts;
-  }, [posts, selectedCategory, selectedEvent, searchTerm]);
+  }, [posts, filters]);
 
   const displayedItems = useMemo(() => {
     const eventGroups: { [key: string]: ParsedPost[] } = {};
     const otherItems: ParsedPost[] = [];
 
     sortedAndFilteredPosts.forEach(post => {
-      if (post.event) {
+      if (post.event && post.event !== "Без события") {
         if (!eventGroups[post.event]) eventGroups[post.event] = [];
         eventGroups[post.event].push(post);
       } else {
@@ -229,292 +162,177 @@ export default function Home() {
       }
     });
 
-    let sortedGroups = Object.entries(eventGroups)
-      .filter(([, posts]) => posts.length > 1)
-      .map(([event, posts]) => ({
-        type: 'group' as const,
-        event,
-        posts,
-        latestDate: new Date(posts[0].pubdate).getTime(),
-        count: posts.length
-      }));
+    const groups = Object.values(eventGroups).map(postsInGroup => ({
+      type: 'group' as const,
+      event: postsInGroup[0].event!,
+      posts: postsInGroup,
+      latestDate: new Date(postsInGroup[0].pubdate).getTime(),
+      count: postsInGroup.length,
+      isRead: postsInGroup.every(p => readPosts.has(p.link_html)),
+    }));
 
-    Object.entries(eventGroups)
-      .filter(([, posts]) => posts.length <= 1)
-      .forEach(([, posts]) => otherItems.push(...posts));
+    const singleItems = otherItems.map(post => ({ ...post, isRead: readPosts.has(post.link_html) }));
 
-    if (sortBy === 'date') {
-      sortedGroups.sort((a, b) => b.latestDate - a.latestDate);
-    } else if (sortBy === 'eventCount') {
-      sortedGroups.sort((a, b) => b.count - a.count);
-    }
+    const combined = [...groups.filter(g => g.posts.length > 1), ...singleItems, ...groups.filter(g => g.posts.length <= 1).flatMap(g => g.posts.map(p => ({ ...p, isRead: readPosts.has(p.link_html) })))];
 
-    const combined: (ParsedPost | {
-      type: 'group', event: string, posts: ParsedPost[], latestDate: number, count: number
-    })[] = [...otherItems];
+    combined.sort((a, b) => {
+      if (a.isRead !== b.isRead) return a.isRead ? 1 : -1;
 
-    sortedGroups.forEach(group => {
-      const insertIndex = combined.findIndex(item => 'pubdate' in item && new Date(item.pubdate).getTime() < group.latestDate);
-      if (insertIndex === -1) combined.push(group);
-      else combined.splice(insertIndex, 0, group);
-    });
+      const dateA = 'type' in a ? a.latestDate : new Date(a.pubdate).getTime();
+      const dateB = 'type' in b ? b.latestDate : new Date(b.pubdate).getTime();
 
-    if (sortBy === 'eventCount') {
-      combined.sort((a, b) => {
-        const countA = 'type' in a ? a.count : 0;
-        const countB = 'type' in b ? b.count : 0;
+      if (filters.sortBy === 'eventCount') {
+        const countA = 'type' in a ? a.count : 1;
+        const countB = 'type' in b ? b.count : 1;
         if (countB !== countA) return countB - countA;
+      }
 
-        const dateA = 'type' in a ? a.latestDate : new Date(a.pubdate).getTime();
-        const dateB = 'type' in b ? b.latestDate : new Date(b.pubdate).getTime();
-        return dateB - dateA;
-      });
-    }
-
-    return combined.slice(0, visiblePostsCount);
-  }, [sortedAndFilteredPosts, visiblePostsCount, sortBy]);
-
-  const postCountsByCategory = useMemo(() => {
-    const counts: { [key: string]: number } = {};
-    posts.forEach(post => {
-      const categories = Array.isArray(post.category) ? post.category : [post.category];
-      categories.forEach(cat => {
-        if (cat) counts[cat] = (counts[cat] || 0) + 1;
-      });
+      return dateB - dateA;
     });
-    return counts;
-  }, [posts]);
 
-  const loadMorePosts = useCallback(() => setVisiblePostsCount(prev => prev + POSTS_PER_PAGE), []);
+    return combined;
+  }, [sortedAndFilteredPosts, filters.sortBy]);
 
-  const handleCategoryChange = useCallback((category: string | null) => {
-    setSelectedCategory(category);
-    setSelectedEvent(null);
+
+  const isFilterActive = filters.selectedCategory !== null || filters.selectedEvent !== null || filters.searchTerm !== '' || filters.categorySearchTerm !== '';
+
+  const handleFilterChange = (action: FilterAction) => {
+    dispatch(action);
     setVisiblePostsCount(POSTS_PER_PAGE);
-  }, []);
-
-  const handleEventChange = useCallback((event: string | null) => {
-    setSelectedEvent(event);
-    setSelectedCategory(null);
-    setVisiblePostsCount(POSTS_PER_PAGE);
-  }, []);
-
-  const handleClearFilters = useCallback(() => {
-    setSelectedCategory(null);
-    setSelectedEvent(null);
-    setCategorySearchTerm('');
-    setSearchTerm('');
-    setVisiblePostsCount(POSTS_PER_PAGE);
-  }, []);
-
-  const handleSearchChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
-    setSearchTerm(event.target.value);
-    setVisiblePostsCount(POSTS_PER_PAGE);
-  }, []);
-
-  const handleCategorySearchChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
-    setCategorySearchTerm(event.target.value);
-    setSelectedCategory(null);
-    setSelectedEvent(null);
-    setVisiblePostsCount(POSTS_PER_PAGE);
-  }, []);
-
-  const isFilterActive = selectedCategory !== null || selectedEvent !== null || searchTerm !== '' || categorySearchTerm !== '';
+  };
 
   return (
-    <div className="bg-slate-100/50 text-slate-900 p-4 sm:p-6 min-h-screen">
-      <div className="max-w-screen-xl mx-auto grid grid-cols-12 gap-8">
+    <div className="min-h-screen bg-gray-100 p-4 flex flex-col lg:flex-row gap-4">
+      <aside className="w-full lg:w-1/4">
+        <div className="bg-white rounded-lg shadow-md p-5 sticky top-4 flex flex-col gap-4 h-full max-h-[calc(100vh-2rem)] overflow-y-auto">
+          <h2 className="text-2xl font-semibold text-gray-800 mb-3 flex items-center gap-2">
+            <FaFilter className="text-indigo-600" /> Меню фильтров
+          </h2>
 
-        <aside className="col-span-12 lg:col-span-4">
-          <div className="sticky top-6 flex flex-col gap-y-6 p-6 bg-white border border-slate-200 rounded-lg shadow-lg">
-
-            <div>
-              <h3 className="text-xl font-bold text-slate-800 mb-4 flex items-center gap-2">
-                <FaFilter className="text-indigo-600" /> Меню фильтров
-              </h3>
-              <div className="flex flex-col gap-2">
-                <button
-                  className="w-full text-center p-3 rounded-lg transition-all duration-200 bg-indigo-600 text-white font-semibold hover:bg-indigo-700 disabled:bg-indigo-300 flex items-center justify-center gap-2"
-                  onClick={() => fetchPosts(false)}
-                  disabled={refreshing}
-                >
-                  {refreshing ? (
-                    <>
-                      <FaSyncAlt className="animate-spin" /> Обновление...
-                    </>
-                  ) : (
-                    <>
-                      <FaSyncAlt /> Обновить ленту
-                    </>
-                  )}
-                </button>
-                {lastRefreshTime && (
-                  <p className="text-sm text-slate-500 text-center">
-                    Последнее обновление: {formatLastRefreshTime(lastRefreshTime)}
-                  </p>
-                )}
-              </div>
-            </div>
-
-            <div>
-              <h3 className="text-lg font-bold text-slate-800 mb-2 flex items-center gap-2">
-                <FaSearch className="text-slate-500 text-base" /> Поиск по новостям
-              </h3>
-              <input
-                type="text"
-                placeholder="Название или источник..."
-                className="block w-full p-3 rounded-md bg-slate-100 text-slate-900 border border-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-400"
-                value={searchTerm}
-                onChange={handleSearchChange}
-              />
-            </div>
-
-            <div>
-              <h3 className="text-lg font-bold text-slate-800 mb-2 flex items-center gap-2">
-                <FaSortAmountDown className="text-slate-500 text-base" /> Сортировка
-              </h3>
-              <div className="flex bg-slate-100 rounded-lg p-1.5 shadow-inner">
-                <button
-                  onClick={() => setSortBy('date')}
-                  className={`flex-1 p-2.5 rounded-md text-sm font-semibold transition-all flex items-center justify-center gap-2 ${sortBy === 'date' ? 'bg-white shadow text-indigo-600' : 'text-slate-600 hover:bg-slate-200'}`}
-                >
-                  <FaCalendarAlt /> Сначала новые
-                </button>
-                <button
-                  onClick={() => setSortBy('eventCount')}
-                  className={`flex-1 p-2.5 rounded-md text-sm font-semibold transition-all flex items-center justify-center gap-2 ${sortBy === 'eventCount' ? 'bg-white shadow text-indigo-600' : 'text-slate-600 hover:bg-slate-200'}`}
-                >
-                  <FaSortNumericDownAlt /> По событиям
-                </button>
-              </div>
-            </div>
-
-            {selectedEvent && (
-              <div className="p-3 bg-indigo-50 border border-indigo-200 rounded-lg flex justify-between items-center">
-                <div>
-                  <h4 className="font-bold text-sm text-indigo-800">Активное событие:</h4>
-                  <span className="text-sm text-slate-700 truncate pr-2">{selectedEvent}</span>
-                </div>
-                <button onClick={() => handleEventChange(null)} className="text-xs text-red-500 hover:underline flex-shrink-0">
-                  <FaTimes className="inline-block mr-1" /> Сбросить
-                </button>
-              </div>
-            )}
-            {selectedCategory && (
-              <div className="p-3 bg-indigo-50 border border-indigo-200 rounded-lg flex justify-between items-center">
-                <div>
-                  <h4 className="font-bold text-sm text-indigo-800">Активная категория:</h4>
-                  <span className="text-sm text-slate-700 truncate pr-2">{selectedCategory}</span>
-                </div>
-                <button onClick={() => handleCategoryChange(null)} className="text-xs text-red-500 hover:underline flex-shrink-0">
-                  <FaTimes className="inline-block mr-1" /> Сбросить
-                </button>
-              </div>
-            )}
-
-            <div>
-              <h3 className="text-lg font-bold text-slate-800 mb-2 flex items-center gap-2">
-                <FaFilter className="text-slate-500 text-base" /> Теги
-              </h3>
-              <input
-                type="text"
-                placeholder="Найти тег..."
-                className="block w-full p-2.5 rounded-md mb-3 bg-slate-100 text-slate-900 border border-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-400"
-                value={categorySearchTerm}
-                onChange={handleCategorySearchChange}
-              />
-              <div className="max-h-80 overflow-y-auto pr-2">
-                <button
-                  className={`w-full text-left p-2 rounded-md mb-1.5 transition-colors text-sm font-medium flex justify-between ${selectedCategory === null && selectedEvent === null && !categorySearchTerm ? 'bg-indigo-600 text-white' : 'hover:bg-slate-100 text-slate-700'}`}
-                  onClick={handleClearFilters}
-                >
-                  <span>Все новости</span>
-                  <span>{posts.length}</span>
-                </button>
-                {filteredCategories.map((category) => (
-                  <button
-                    key={category}
-                    className={`w-full text-left p-2 rounded-md mb-1.5 transition-colors text-sm flex justify-between items-center ${selectedCategory === category ? 'bg-indigo-600 text-white' : 'hover:bg-slate-100 text-slate-700'}`}
-                    onClick={() => handleCategoryChange(category)}
-                  >
-                    <span className="truncate pr-2">{category}</span>
-                    <span className="bg-slate-200 text-slate-600 text-xs font-semibold px-2 py-0.5 rounded-full">{postCountsByCategory[category] || 0}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="flex-1">
-              <label htmlFor="event-select" className="block text-sm font-medium text-slate-700 mb-1">
-                <FaFilter className="inline-block mr-1 text-indigo-600" /> Фильтр по событию
-              </label>
-              <select
-                id="event-select"
-                className="block w-full p-3 border border-slate-300 rounded-md bg-white text-slate-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
-                value={selectedEvent || ''}
-                onChange={(e) => handleEventChange(e.target.value === '' ? null : e.target.value)}
-                disabled={allEvents.length === 0}
-              >
-                <option value="">Все события</option>
-                {allEvents.map(event => (
-                  <option key={event} value={event}>{event}</option>
-                ))}
-              </select>
-            </div>
-
-            {isFilterActive && (
-              <button
-                onClick={handleClearFilters}
-                className="self-center mt-2 p-3 bg-red-500 text-white rounded-md shadow-sm hover:bg-red-600 transition-colors flex items-center justify-center gap-2 whitespace-nowrap"
-              >
-                <MdClear /> Сбросить все фильтры
-              </button>
-            )}
-          </div>
-        </aside>
-
-        <main className="col-span-12 lg:col-span-8 flex flex-col">
-          {initialLoading && <div className="text-center text-lg text-indigo-600 mt-10">Загрузка новостей...</div>}
-          {!initialLoading && error && <div className="text-center text-lg text-red-600 p-4 bg-red-100 rounded-lg w-full">{error}</div>}
-
-          {!initialLoading && !error && displayedItems.length > 0 && displayedItems.map((item, index) =>
-            'type' in item && item.type === 'group' ? (
-              <EventGroupComponent
-                key={index}
-                event={item.event}
-                posts={item.posts}
-                formatPublicationDate={formatPublicationDate}
-              />
-            ) : (
-              <PostComponent
-                key={index}
-                title={(item as ParsedPost).title}
-                link={(item as ParsedPost).link_html}
-                from={(item as ParsedPost).from}
-                category={(item as ParsedPost).category}
-                publication_date={formatPublicationDate((item as ParsedPost).pubdate)}
-                rss_link={(item as ParsedPost).link_xml}
-                event={(item as ParsedPost).event}
-              />
-            )
-          )}
-
-          {!initialLoading && !error && displayedItems.length === 0 && (
-            <div className="text-center text-lg text-slate-500 mt-10 p-5 bg-white rounded-lg shadow-sm">
-              Нет доступных постов по вашему запросу. Попробуйте изменить фильтры или обновить ленту.
-            </div>
-          )}
-
-          {sortedAndFilteredPosts.length > visiblePostsCount && (
+          <div className="border-b border-gray-200 pb-5">
             <button
-              onClick={loadMorePosts}
-              className="mt-6 p-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors duration-200 font-semibold shadow-md self-center min-w-[200px]"
+              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-md text-base font-medium bg-indigo-600 text-white hover:bg-indigo-700 transition-colors duration-300 disabled:bg-indigo-400 disabled:cursor-not-allowed"
+              onClick={() => fetchPosts(false)}
+              disabled={refreshing}
             >
-              Загрузить еще {Math.min(POSTS_PER_PAGE, sortedAndFilteredPosts.length - visiblePostsCount)}
+              <FaSyncAlt className={refreshing ? "animate-spin" : ""} />
+              {refreshing ? "Обновление..." : "Обновить ленту"}
+            </button>
+            {lastRefreshTime && <p className="text-xs text-gray-500 text-center mt-2">Последнее обновление: {formatLastRefreshTime(lastRefreshTime)}</p>}
+          </div>
+
+          <div className="border-b border-gray-200 pb-5">
+            <h3 className="text-lg font-semibold text-gray-700 mb-2 flex items-center gap-2"><FaSearch className="text-gray-500" /> Поиск по новостям</h3>
+            <input
+              type="text"
+              placeholder="Название или источник..."
+              className="w-full px-3 py-2 rounded-md bg-gray-50 border border-gray-300 focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 text-gray-800 text-sm"
+              value={filters.searchTerm}
+              onChange={(e) => handleFilterChange({ type: 'SET_SEARCH_TERM', payload: e.target.value })}
+            />
+          </div>
+
+          <div className="border-b border-gray-200 pb-5">
+            <h3 className="text-lg font-semibold text-gray-700 mb-2 flex items-center gap-2"><FaSortAmountDown className="text-gray-500" /> Сортировка</h3>
+            <div className="flex bg-gray-100 rounded-md p-1 shadow-inner text-sm">
+              <button
+                onClick={() => handleFilterChange({ type: 'SET_SORT_BY', payload: 'date' })}
+                className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md font-medium transition-all duration-200
+                  ${filters.sortBy === 'date' ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-600 hover:bg-gray-200'}`}
+              >
+                <FaCalendarAlt /> Новые
+              </button>
+              <button
+                onClick={() => handleFilterChange({ type: 'SET_SORT_BY', payload: 'eventCount' })}
+                className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md font-medium transition-all duration-200
+                  ${filters.sortBy === 'eventCount' ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-600 hover:bg-gray-200'}`}
+              >
+                <FaSortNumericDownAlt /> Популярные
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <h3 className="text-lg font-semibold text-gray-700 mb-2 flex items-center gap-2"><FaFilter className="text-gray-500" /> Теги</h3>
+            <input
+              type="text"
+              placeholder="Найти тег..."
+              className="w-full px-3 py-2 rounded-md mb-3 bg-gray-50 border border-gray-300 focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 text-gray-800 text-sm"
+              value={filters.categorySearchTerm}
+              onChange={(e) => handleFilterChange({ type: 'SET_CATEGORY_SEARCH_TERM', payload: e.target.value })}
+            />
+            <div className="max-h-72 overflow-y-auto pr-2 custom-scrollbar text-sm">
+              <button
+                className={`w-full text-left px-3 py-2 rounded-md mb-1.5 font-medium flex justify-between items-center transition-colors duration-200
+                  ${!filters.selectedCategory && !filters.selectedEvent && !filters.categorySearchTerm ? 'bg-indigo-600 text-white shadow-sm' : 'text-gray-800 hover:bg-gray-100'}`}
+                onClick={() => handleFilterChange({ type: 'RESET_FILTERS' })}
+              >
+                <span>Все новости</span>
+                <span className={`px-2 py-0.5 text-xs font-semibold rounded-full ${!filters.selectedCategory && !filters.selectedEvent && !filters.categorySearchTerm ? 'bg-indigo-700 text-white' : 'bg-gray-200 text-gray-700'}`}>
+                  {posts.length}
+                </span>
+              </button>
+              {filteredCategories.map((category) => (
+                <button
+                  key={category}
+                  className={`w-full text-left px-3 py-2 rounded-md mb-1.5 flex justify-between items-center transition-colors duration-200
+                    ${filters.selectedCategory === category ? 'bg-indigo-600 text-white shadow-sm' : 'text-gray-700 hover:bg-gray-100'}`}
+                  onClick={() => handleFilterChange({ type: 'SET_CATEGORY', payload: category })}
+                >
+                  <span className="truncate mr-2">{category}</span>
+                  <span className={`px-2 py-0.5 text-xs font-semibold rounded-full ${filters.selectedCategory === category ? 'bg-indigo-700 text-white' : 'bg-gray-200 text-gray-700'}`}>
+                    {postCountsByCategory[category] || 0}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {isFilterActive && (
+            <button
+              onClick={() => handleFilterChange({ type: 'RESET_FILTERS' })}
+              className="w-full mt-4 flex items-center justify-center gap-2 px-4 py-2.5 rounded-md text-base font-medium bg-red-500 text-white hover:bg-red-600 transition-colors duration-300 shadow-md"
+            >
+              <MdClear /> Сбросить все фильтры
             </button>
           )}
-        </main>
-      </div>
+        </div>
+      </aside>
+
+      <main className="w-full lg:w-3/5 flex flex-col">
+        {initialLoading && <div className="text-center text-xl text-indigo-600 mt-10 p-5 bg-white rounded-lg shadow-lg">Загрузка новостей...</div>}
+        {!initialLoading && error && <div className="text-center text-lg text-red-600 p-5 bg-red-100 rounded-lg shadow-md border border-red-200">{error}</div>}
+        {!initialLoading && !error && displayedItems.slice(0, visiblePostsCount).map((item) =>
+          'type' in item && item.type === 'group' ? (
+            <EventGroupComponent key={item.event} event={item.event} posts={item.posts} formatPublicationDate={formatPublicationDate} readPosts={readPosts} markAsRead={markPostAsRead} />
+          ) : (
+            <PostComponent
+              key={(item as ParsedPost).link_html}
+              title={(item as ParsedPost).title}
+              link={(item as ParsedPost).link_html}
+              from={(item as ParsedPost).from}
+              category={(item as ParsedPost).category}
+              publication_date={formatPublicationDate((item as ParsedPost).pubdate)}
+              rss_link={(item as ParsedPost).link_xml}
+              event={(item as ParsedPost).event}
+              isRead={readPosts.has((item as ParsedPost).link_html)}
+              markAsRead={markPostAsRead}
+            />)
+        )}
+        {!initialLoading && !error && displayedItems.length === 0 && (
+          <div className="text-center text-lg text-gray-600 mt-10 p-8 bg-white rounded-lg shadow-lg border border-gray-200">
+            Нет постов по вашему запросу. Попробуйте изменить фильтры.
+          </div>
+        )}
+        {displayedItems.length > visiblePostsCount && (
+          <button
+            onClick={() => setVisiblePostsCount(prev => prev + POSTS_PER_PAGE)}
+            className="mt-8 mb-4 p-4 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-semibold text-lg shadow-lg self-center w-full max-w-xs transition-colors duration-300"
+          >
+            Загрузить еще
+          </button>
+        )}
+      </main>
     </div>
   );
 }
