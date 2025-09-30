@@ -76,8 +76,8 @@ export function PostComponent ({ title, link, from, category, publication_date, 
             </div>
             {category && category.length > 0 && (
                 <div className="text-xs text-gray-500 mt-4 flex flex-wrap gap-2">
-                    {category.map(cat => (
-                        <span key={cat} className="bg-indigo-100 text-indigo-700 px-3 py-1 rounded-full font-medium">{cat}</span>
+                    {category.map((cat,index) => (
+                        <span key={index} className="bg-indigo-100 text-indigo-700 px-3 py-1 rounded-full font-medium">{cat}</span>
                     ))}
                 </div>
             )}
