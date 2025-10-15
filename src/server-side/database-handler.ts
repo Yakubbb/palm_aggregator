@@ -23,12 +23,29 @@ export async function get_all_posts(): Promise<ParsedPost[]> {
     const database = client.db("rss-parser");
     const collection = database.collection("news");
 
-    return (await collection.find().toArray()).map(post => {
+    const requiredFields = [
+        'from',
+        'title',
+        'pubdate',
+        'link_html',
+        'link_xml',
+        'category'
+    ];
+
+    const query = {} as any;
+    requiredFields.forEach(field => {
+        query[field] = { $exists: true, $ne: null };
+    });
+
+    const postsFromDb = await collection.find(query).toArray();
+
+
+    return postsFromDb.map(post => {
         return {
             ...post,
             _id: post._id.toString()
         };
-    }) as any as ParsedPost[] //xd
+    }) as any as ParsedPost[]; //xd
 
 }
 

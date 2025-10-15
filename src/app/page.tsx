@@ -1,9 +1,10 @@
 'use client'
-import { PostComponent, EventGroupComponent } from "@/components/posts_elements";
+import { EventGroupComponent } from "@/components/EventGroup";
+import { PostComponent } from "@/components/Post";
 import { get_all_posts, ParsedPost } from "@/server-side/database-handler";
 import { useEffect, useState, useMemo, useCallback, useReducer } from "react";
-import { FaSyncAlt, FaSearch, FaFilter, FaTimes, FaSortAmountDown, FaSortNumericDownAlt, FaCalendarAlt } from 'react-icons/fa';
-import { MdClear } from 'react-icons/md';
+import { FaSyncAlt, FaSearch, FaFilter, FaSortAmountUp, FaCalendarAlt, FaStar, FaNewspaper } from 'react-icons/fa';
+import { MdClear, MdOutlineFeed } from 'react-icons/md';
 
 const POSTS_PER_PAGE = 50;
 const READ_POSTS_STORAGE_KEY = 'readPosts';
@@ -35,11 +36,11 @@ const initialFilterState: FilterState = {
 function filterReducer(state: FilterState, action: FilterAction): FilterState {
   switch (action.type) {
     case 'SET_CATEGORY':
-      return { ...state, selectedCategory: action.payload, selectedEvent: null };
+      return { ...state, selectedCategory: action.payload, selectedEvent: null, searchTerm: '' };
     case 'SET_EVENT':
-      return { ...state, selectedEvent: action.payload, selectedCategory: null };
+      return { ...state, selectedEvent: action.payload, selectedCategory: null, searchTerm: '' };
     case 'SET_SEARCH_TERM':
-      return { ...state, searchTerm: action.payload };
+        return { ...state, searchTerm: action.payload, selectedCategory: null, selectedEvent: null };
     case 'SET_CATEGORY_SEARCH_TERM':
       return { ...state, categorySearchTerm: action.payload };
     case 'SET_SORT_BY':
@@ -121,7 +122,6 @@ export default function Home() {
   };
 
   const allCategories = useMemo(() => Array.from(new Set(posts.flatMap(p => p.category || []))).sort(), [posts]);
-  const allEvents = useMemo(() => Array.from(new Set(posts.map(p => p.event).filter(Boolean as any))).sort(), [posts]);
 
   const postCountsByCategory = useMemo(() => {
     return posts.reduce((counts, post) => {
@@ -130,6 +130,32 @@ export default function Home() {
       });
       return counts;
     }, {} as { [key: string]: number });
+  }, [posts]);
+    
+  const popularEvents = useMemo(() => {
+    const eventCounts: { [key: string]: number } = {};
+    posts.forEach(post => {
+      if (post.event && post.event !== "Без события") {
+        eventCounts[post.event] = (eventCounts[post.event] || 0) + 1;
+      }
+    });
+    return Object.entries(eventCounts)
+      .map(([event, count]) => ({ event, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 3);
+  }, [posts]);
+
+  const popularSources = useMemo(() => {
+    const sourceCounts: { [key: string]: number } = {};
+    posts.forEach(post => {
+      if (post.from) {
+        sourceCounts[post.from] = (sourceCounts[post.from] || 0) + 1;
+      }
+    });
+    return Object.entries(sourceCounts)
+      .map(([from, count]) => ({ from, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5);
   }, [posts]);
 
   const filteredCategories = useMemo(() => {
@@ -144,7 +170,6 @@ export default function Home() {
       if (filters.searchTerm && !(post.title.toLowerCase().includes(filters.searchTerm.toLowerCase()) || post.from.toLowerCase().includes(filters.searchTerm.toLowerCase()))) return false;
       return true;
     });
-
     currentPosts.sort((a, b) => new Date(b.pubdate).getTime() - new Date(a.pubdate).getTime());
     return currentPosts;
   }, [posts, filters]);
@@ -152,7 +177,6 @@ export default function Home() {
   const displayedItems = useMemo(() => {
     const eventGroups: { [key: string]: ParsedPost[] } = {};
     const otherItems: ParsedPost[] = [];
-
     sortedAndFilteredPosts.forEach(post => {
       if (post.event && post.event !== "Без события") {
         if (!eventGroups[post.event]) eventGroups[post.event] = [];
@@ -177,22 +201,18 @@ export default function Home() {
 
     combined.sort((a, b) => {
       if (a.isRead !== b.isRead) return a.isRead ? 1 : -1;
-
       const dateA = 'type' in a ? a.latestDate : new Date(a.pubdate).getTime();
       const dateB = 'type' in b ? b.latestDate : new Date(b.pubdate).getTime();
-
       if (filters.sortBy === 'eventCount') {
         const countA = 'type' in a ? a.count : 1;
         const countB = 'type' in b ? b.count : 1;
         if (countB !== countA) return countB - countA;
       }
-
       return dateB - dateA;
     });
 
     return combined;
   }, [sortedAndFilteredPosts, filters.sortBy]);
-
 
   const isFilterActive = filters.selectedCategory !== null || filters.selectedEvent !== null || filters.searchTerm !== '' || filters.categorySearchTerm !== '';
 
@@ -202,137 +222,209 @@ export default function Home() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-100 p-4 flex flex-col lg:flex-row gap-4">
-      <aside className="w-full lg:w-1/4">
-        <div className="bg-white rounded-lg shadow-md p-5 sticky top-4 flex flex-col gap-4 h-full max-h-[calc(100vh-2rem)] overflow-y-auto">
-          <h2 className="text-2xl font-semibold text-gray-800 mb-3 flex items-center gap-2">
-            <FaFilter className="text-indigo-600" /> Меню фильтров
-          </h2>
-
-          <div className="border-b border-gray-200 pb-5">
-            <button
-              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-md text-base font-medium bg-indigo-600 text-white hover:bg-indigo-700 transition-colors duration-300 disabled:bg-indigo-400 disabled:cursor-not-allowed"
-              onClick={() => fetchPosts(false)}
-              disabled={refreshing}
-            >
-              <FaSyncAlt className={refreshing ? "animate-spin" : ""} />
-              {refreshing ? "Обновление..." : "Обновить ленту"}
-            </button>
-            {lastRefreshTime && <p className="text-xs text-gray-500 text-center mt-2">Последнее обновление: {formatLastRefreshTime(lastRefreshTime)}</p>}
-          </div>
-
-          <div className="border-b border-gray-200 pb-5">
-            <h3 className="text-lg font-semibold text-gray-700 mb-2 flex items-center gap-2"><FaSearch className="text-gray-500" /> Поиск по новостям</h3>
-            <input
-              type="text"
-              placeholder="Название или источник..."
-              className="w-full px-3 py-2 rounded-md bg-gray-50 border border-gray-300 focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 text-gray-800 text-sm"
-              value={filters.searchTerm}
-              onChange={(e) => handleFilterChange({ type: 'SET_SEARCH_TERM', payload: e.target.value })}
-            />
-          </div>
-
-          <div className="border-b border-gray-200 pb-5">
-            <h3 className="text-lg font-semibold text-gray-700 mb-2 flex items-center gap-2"><FaSortAmountDown className="text-gray-500" /> Сортировка</h3>
-            <div className="flex bg-gray-100 rounded-md p-1 shadow-inner text-sm">
-              <button
-                onClick={() => handleFilterChange({ type: 'SET_SORT_BY', payload: 'date' })}
-                className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md font-medium transition-all duration-200
-                  ${filters.sortBy === 'date' ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-600 hover:bg-gray-200'}`}
-              >
-                <FaCalendarAlt /> Новые
-              </button>
-              <button
-                onClick={() => handleFilterChange({ type: 'SET_SORT_BY', payload: 'eventCount' })}
-                className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md font-medium transition-all duration-200
-                  ${filters.sortBy === 'eventCount' ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-600 hover:bg-gray-200'}`}
-              >
-                <FaSortNumericDownAlt /> Популярные
-              </button>
-            </div>
-          </div>
-
-          <div>
-            <h3 className="text-lg font-semibold text-gray-700 mb-2 flex items-center gap-2"><FaFilter className="text-gray-500" /> Теги</h3>
-            <input
-              type="text"
-              placeholder="Найти тег..."
-              className="w-full px-3 py-2 rounded-md mb-3 bg-gray-50 border border-gray-300 focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 text-gray-800 text-sm"
-              value={filters.categorySearchTerm}
-              onChange={(e) => handleFilterChange({ type: 'SET_CATEGORY_SEARCH_TERM', payload: e.target.value })}
-            />
-            <div className="max-h-72 overflow-y-auto pr-2 custom-scrollbar text-sm">
-              <button
-                className={`w-full text-left px-3 py-2 rounded-md mb-1.5 font-medium flex justify-between items-center transition-colors duration-200
-                  ${!filters.selectedCategory && !filters.selectedEvent && !filters.categorySearchTerm ? 'bg-indigo-600 text-white shadow-sm' : 'text-gray-800 hover:bg-gray-100'}`}
-                onClick={() => handleFilterChange({ type: 'RESET_FILTERS' })}
-              >
-                <span>Все новости</span>
-                <span className={`px-2 py-0.5 text-xs font-semibold rounded-full ${!filters.selectedCategory && !filters.selectedEvent && !filters.categorySearchTerm ? 'bg-indigo-700 text-white' : 'bg-gray-200 text-gray-700'}`}>
-                  {posts.length}
-                </span>
-              </button>
-              {filteredCategories.map((category) => (
+    <div className="min-h-screen bg-slate-50">
+      <div className="max-w-screen-2xl mx-auto p-4 sm:p-6 lg:p-8 flex flex-col lg:flex-row gap-8">
+        
+        <aside className="w-full lg:w-80 lg:flex-shrink-0">
+          <div className="bg-white/80 backdrop-blur-sm border border-gray-200/80 rounded-2xl shadow-lg p-6 sticky top-8 flex flex-col gap-6 h-full max-h-[calc(100vh-4rem)]">
+            <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-3">
+              <FaFilter className="text-indigo-500" /> Фильтры
+            </h2>
+            
+            <div className="flex-grow overflow-y-auto pr-2 -mr-2 space-y-6">
+              <div>
                 <button
-                  key={category}
-                  className={`w-full text-left px-3 py-2 rounded-md mb-1.5 flex justify-between items-center transition-colors duration-200
-                    ${filters.selectedCategory === category ? 'bg-indigo-600 text-white shadow-sm' : 'text-gray-700 hover:bg-gray-100'}`}
-                  onClick={() => handleFilterChange({ type: 'SET_CATEGORY', payload: category })}
+                  className="w-full flex items-center justify-center gap-2.5 px-4 py-3 rounded-full text-base font-semibold bg-gradient-to-r from-indigo-500 to-violet-600 text-white shadow-md hover:shadow-lg transition-all duration-300 transform hover:-translate-y-0.5 disabled:bg-indigo-400 disabled:cursor-not-allowed disabled:transform-none disabled:shadow-md"
+                  onClick={() => fetchPosts(false)}
+                  disabled={refreshing}
                 >
-                  <span className="truncate mr-2">{category}</span>
-                  <span className={`px-2 py-0.5 text-xs font-semibold rounded-full ${filters.selectedCategory === category ? 'bg-indigo-700 text-white' : 'bg-gray-200 text-gray-700'}`}>
-                    {postCountsByCategory[category] || 0}
-                  </span>
+                  <FaSyncAlt className={refreshing ? "animate-spin" : ""} />
+                  {refreshing ? "Обновление..." : "Обновить ленту"}
                 </button>
-              ))}
+                {lastRefreshTime && <p className="text-xs text-gray-500 text-center mt-2.5">Обновлено: {formatLastRefreshTime(lastRefreshTime)}</p>}
+              </div>
+
+              <div>
+                <h3 className="text-sm font-semibold text-gray-600 mb-2 px-1">Поиск</h3>
+                <div className="relative">
+                  <FaSearch className="absolute top-1/2 left-4 -translate-y-1/2 text-gray-400" />
+                  <input
+                    type="text"
+                    placeholder="Название или источник..."
+                    className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-slate-100 border border-transparent focus:outline-none focus:ring-2 focus:ring-indigo-400 text-gray-800"
+                    value={filters.searchTerm}
+                    onChange={(e) => handleFilterChange({ type: 'SET_SEARCH_TERM', payload: e.target.value })}
+                  />
+                </div>
+              </div>
+
+              <div>
+                 <h3 className="text-sm font-semibold text-gray-600 mb-2 px-1">Сортировка</h3>
+                <div className="flex bg-slate-100 rounded-xl p-1 text-sm">
+                  <button
+                    onClick={() => handleFilterChange({ type: 'SET_SORT_BY', payload: 'date' })}
+                    className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg font-semibold transition-all duration-200 ${filters.sortBy === 'date' ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-600 hover:bg-white/60'}`}
+                  >
+                    <FaCalendarAlt /> Новые
+                  </button>
+                  <button
+                    onClick={() => handleFilterChange({ type: 'SET_SORT_BY', payload: 'eventCount' })}
+                    className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg font-semibold transition-all duration-200 ${filters.sortBy === 'eventCount' ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-600 hover:bg-white/60'}`}
+                  >
+                    <FaSortAmountUp /> Популярные
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <h3 className="text-sm font-semibold text-gray-600 mb-2 px-1">Теги</h3>
+                <div className="relative mb-3">
+                    <FaSearch className="absolute top-1/2 left-4 -translate-y-1/2 text-gray-400" />
+                    <input
+                      type="text"
+                      placeholder="Найти тег..."
+                      className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-slate-100 border border-transparent focus:outline-none focus:ring-2 focus:ring-indigo-400 text-gray-800"
+                      value={filters.categorySearchTerm}
+                      onChange={(e) => handleFilterChange({ type: 'SET_CATEGORY_SEARCH_TERM', payload: e.target.value })}
+                    />
+                </div>
+                <div className="space-y-1.5 text-sm max-h-72 overflow-y-auto pr-2">
+                  <button
+                    className={`w-full text-left px-4 py-2 rounded-lg font-semibold flex justify-between items-center transition-all duration-200 ${!filters.selectedCategory && !filters.selectedEvent && !filters.categorySearchTerm ? 'bg-gradient-to-r from-indigo-500 to-violet-500 text-white shadow-sm' : 'text-gray-700 hover:bg-indigo-50 hover:text-indigo-600'}`}
+                    onClick={() => handleFilterChange({ type: 'RESET_FILTERS' })}
+                  >
+                    <span>Все новости</span>
+                    <span className={`px-2.5 py-0.5 text-xs rounded-full ${!filters.selectedCategory && !filters.selectedEvent && !filters.categorySearchTerm ? 'bg-white/20' : 'bg-gray-200 text-gray-700'}`}>
+                      {posts.length}
+                    </span>
+                  </button>
+                  {filteredCategories.map((category) => (
+                    <button
+                      key={category}
+                      className={`w-full text-left px-4 py-2 rounded-lg flex justify-between items-center transition-all duration-200 ${filters.selectedCategory === category ? 'bg-gradient-to-r from-indigo-500 to-violet-500 text-white font-semibold shadow-sm' : 'text-gray-700 hover:bg-indigo-50 hover:text-indigo-600'}`}
+                      onClick={() => handleFilterChange({ type: 'SET_CATEGORY', payload: category })}
+                    >
+                      <span className="truncate mr-2">{category}</span>
+                      <span className={`px-2.5 py-0.5 text-xs font-semibold rounded-full ${filters.selectedCategory === category ? 'bg-white/20' : 'bg-gray-200 text-gray-700'}`}>
+                        {postCountsByCategory[category] || 0}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
-          </div>
 
-          {isFilterActive && (
-            <button
-              onClick={() => handleFilterChange({ type: 'RESET_FILTERS' })}
-              className="w-full mt-4 flex items-center justify-center gap-2 px-4 py-2.5 rounded-md text-base font-medium bg-red-500 text-white hover:bg-red-600 transition-colors duration-300 shadow-md"
-            >
-              <MdClear /> Сбросить все фильтры
-            </button>
+            {isFilterActive && (
+              <div className="mt-auto pt-4 border-t border-gray-200">
+                  <button
+                    onClick={() => handleFilterChange({ type: 'RESET_FILTERS' })}
+                    className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold bg-gray-200 text-gray-700 hover:bg-gray-300 transition-colors duration-200"
+                  >
+                    <MdClear /> Сбросить фильтры
+                  </button>
+              </div>
+            )}
+          </div>
+        </aside>
+
+        <main className="flex-1 min-w-0">
+          {initialLoading && (
+            <div className="text-center text-xl text-indigo-600 mt-10 p-10 bg-white rounded-2xl shadow-lg">Загрузка новостей...</div>
           )}
-        </div>
-      </aside>
+          {!initialLoading && error && (
+            <div className="text-center text-lg text-red-600 p-10 bg-red-50 rounded-2xl shadow-md border border-red-200">{error}</div>
+          )}
+          
+          {!initialLoading && !error && displayedItems.length > 0 && (
+            <div className="space-y-6">
+               {displayedItems.slice(0, visiblePostsCount).map((item,index) =>
+                'type' in item && item.type === 'group' ? (
+                  <EventGroupComponent key={index} event={item.event} posts={item.posts} formatPublicationDate={formatPublicationDate} readPosts={readPosts} markAsRead={markPostAsRead} />
+                ) : (
+                  <PostComponent
+                    key={index}
+                    title={(item as ParsedPost).title}
+                    link={(item as ParsedPost).link_html}
+                    from={(item as ParsedPost).from}
+                    category={(item as ParsedPost).category}
+                    publication_date={formatPublicationDate((item as ParsedPost).pubdate)}
+                    rss_link={(item as ParsedPost).link_xml}
+                    event={(item as ParsedPost).event}
+                    isRead={readPosts.has((item as ParsedPost).link_html)}
+                    markAsRead={markPostAsRead}
+                  />)
+              )}
+            </div>
+          )}
+          
+          {!initialLoading && !error && displayedItems.length === 0 && (
+            <div className="text-center text-lg text-gray-600 mt-10 p-12 bg-white rounded-2xl shadow-lg border border-gray-200 flex flex-col items-center gap-4">
+              <MdOutlineFeed className="w-16 h-16 text-gray-300" />
+              <h3 className="text-xl font-bold">Новостей не найдено</h3>
+              <p className="max-w-xs">По вашему запросу ничего не найдено. Попробуйте изменить фильтры или обновить ленту.</p>
+            </div>
+          )}
 
-      <main className="w-full lg:w-3/5 flex flex-col">
-        {initialLoading && <div className="text-center text-xl text-indigo-600 mt-10 p-5 bg-white rounded-lg shadow-lg">Загрузка новостей...</div>}
-        {!initialLoading && error && <div className="text-center text-lg text-red-600 p-5 bg-red-100 rounded-lg shadow-md border border-red-200">{error}</div>}
-        {!initialLoading && !error && displayedItems.slice(0, visiblePostsCount).map((item) =>
-          'type' in item && item.type === 'group' ? (
-            <EventGroupComponent key={item.event} event={item.event} posts={item.posts} formatPublicationDate={formatPublicationDate} readPosts={readPosts} markAsRead={markPostAsRead} />
-          ) : (
-            <PostComponent
-              key={(item as ParsedPost).link_html}
-              title={(item as ParsedPost).title}
-              link={(item as ParsedPost).link_html}
-              from={(item as ParsedPost).from}
-              category={(item as ParsedPost).category}
-              publication_date={formatPublicationDate((item as ParsedPost).pubdate)}
-              rss_link={(item as ParsedPost).link_xml}
-              event={(item as ParsedPost).event}
-              isRead={readPosts.has((item as ParsedPost).link_html)}
-              markAsRead={markPostAsRead}
-            />)
-        )}
-        {!initialLoading && !error && displayedItems.length === 0 && (
-          <div className="text-center text-lg text-gray-600 mt-10 p-8 bg-white rounded-lg shadow-lg border border-gray-200">
-            Нет постов по вашему запросу. Попробуйте изменить фильтры.
-          </div>
-        )}
-        {displayedItems.length > visiblePostsCount && (
-          <button
-            onClick={() => setVisiblePostsCount(prev => prev + POSTS_PER_PAGE)}
-            className="mt-8 mb-4 p-4 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-semibold text-lg shadow-lg self-center w-full max-w-xs transition-colors duration-300"
-          >
-            Загрузить еще
-          </button>
-        )}
-      </main>
+          {displayedItems.length > visiblePostsCount && (
+            <div className="text-center mt-10">
+              <button
+                onClick={() => setVisiblePostsCount(prev => prev + POSTS_PER_PAGE)}
+                className="px-8 py-4 bg-white border-2 border-indigo-500 text-indigo-600 rounded-full font-bold text-lg shadow-lg hover:bg-indigo-50 hover:shadow-xl transform hover:-translate-y-0.5 transition-all duration-300"
+              >
+                Загрузить еще
+              </button>
+            </div>
+          )}
+        </main>
+        
+        <aside className="hidden xl:block w-full xl:w-72">
+            <div className="bg-white/80 backdrop-blur-sm border border-gray-200/80 rounded-2xl shadow-lg p-6 sticky top-8 space-y-6">
+                {popularEvents.length > 0 && (
+                    <div>
+                        <h2 className="text-xl font-bold text-gray-800 flex items-center gap-3 mb-4">
+                            <FaStar className="text-amber-500" /> Популярные события
+                        </h2>
+                        <div className="space-y-1.5 text-sm">
+                            {popularEvents.map(item => (
+                               <button
+                                  key={item.event}
+                                  className={`w-full text-left px-4 py-2 rounded-lg flex justify-between items-center transition-all duration-200 ${filters.selectedEvent === item.event ? 'bg-gradient-to-r from-indigo-500 to-violet-500 text-white font-semibold shadow-sm' : 'text-gray-700 hover:bg-indigo-50 hover:text-indigo-600'}`}
+                                  onClick={() => handleFilterChange({ type: 'SET_EVENT', payload: item.event })}
+                                >
+                                  <span className="truncate mr-2">{item.event}</span>
+                                  <span className={`px-2.5 py-0.5 text-xs font-semibold rounded-full ${filters.selectedEvent === item.event ? 'bg-white/20' : 'bg-gray-200 text-gray-700'}`}>
+                                    {item.count}
+                                  </span>
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                )}
+                {popularSources.length > 0 && (
+                    <div>
+                        <h2 className="text-xl font-bold text-gray-800 flex items-center gap-3 mb-4">
+                            <FaNewspaper className="text-sky-500" /> Популярные источники
+                        </h2>
+                        <div className="space-y-1.5 text-sm">
+                            {popularSources.map(item => (
+                               <button
+                                  key={item.from}
+                                  className={`w-full text-left px-4 py-2 rounded-lg flex justify-between items-center transition-all duration-200 ${filters.searchTerm === item.from ? 'bg-gradient-to-r from-sky-500 to-cyan-500 text-white font-semibold shadow-sm' : 'text-gray-700 hover:bg-sky-50 hover:text-sky-600'}`}
+                                  onClick={() => handleFilterChange({ type: 'SET_SEARCH_TERM', payload: item.from })}
+                                >
+                                  <span className="truncate mr-2">{item.from}</span>
+                                  <span className={`px-2.5 py-0.5 text-xs font-semibold rounded-full ${filters.searchTerm === item.from ? 'bg-white/20' : 'bg-gray-200 text-gray-700'}`}>
+                                    {item.count}
+                                  </span>
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                )}
+            </div>
+        </aside>
+
+      </div>
     </div>
   );
 }
